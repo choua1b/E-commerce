@@ -1,0 +1,7 @@
+{
+  "default": { "event": "generic", "urgency": 0.3, "days_until_end": 30 },
+  "windows": [
+    { "event": "black_friday", "start": "2019-11-22", "end": "2019-12-02" },
+    { "event": "christmas", "start": "2019-12-10", "end": "2019-12-25" }
+  ]
+}

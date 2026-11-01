@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from .neural_ranker import NeuralScorer
 from .schemas import EventContext, Product, Recommendation, RetailEvent
 
 
 @dataclass
 class EventAwareRanker:
-    """Explainable serving ranker; a neural model can replace `score` after training."""
+    """Explainable heuristic ranker (also the fallback and the cold-start strategy)."""
     model_version: str = "heuristic-v1"
 
     def score(self, product: Product, context: EventContext) -> tuple[float, list[str]]:
@@ -31,3 +32,42 @@ class EventAwareRanker:
         ranked.sort(key=lambda item: item[1], reverse=True)
         return [Recommendation(product=p, score=score, reasons=reasons, model_version=self.model_version)
                 for p, score, reasons in ranked[:limit]]
+
+
+@dataclass
+class HybridRanker:
+    """Blends the learned two-tower score with the heuristic; falls back to heuristic-only."""
+    heuristic: EventAwareRanker = field(default_factory=EventAwareRanker)
+    neural: NeuralScorer | None = None
+    neural_weight: float = 0.6
+
+    @property
+    def model_version(self) -> str:
+        if self.neural and self.neural.available:
+            return f"{self.neural.version}+heuristic"
+        return self.heuristic.model_version
+
+    def recommend(self, products: list[Product], context: EventContext, limit: int = 10) -> list[Recommendation]:
+        candidates = [p for p in products if not context.category or p.category.lower() == context.category.lower()]
+        if not candidates:
+            return []
+        heuristic = [self.heuristic.score(p, context) for p in candidates]
+        neural = self.neural.score(candidates, context) if self.neural and self.neural.available else []
+        if neural:  # min-max normalise within the candidate set so scales are comparable
+            low, high = min(neural), max(neural)
+            span = (high - low) or 1.0
+            neural = [(value - low) / span for value in neural]
+
+        ranked = []
+        for index, product in enumerate(candidates):
+            base, reasons = heuristic[index]
+            if neural:
+                score = self.neural_weight * neural[index] + (1 - self.neural_weight) * base
+                if neural[index] >= 0.7:
+                    reasons = [*reasons, "learned model predicts high engagement"]
+            else:
+                score = base
+            ranked.append((product, round(score, 4), reasons))
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        return [Recommendation(product=p, score=s, reasons=r, model_version=self.model_version)
+                for p, s, r in ranked[:limit]]

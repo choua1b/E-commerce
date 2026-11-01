@@ -3,3 +3,12 @@ __pycache__/
 .pytest_cache/
 data/*.db
 artifacts/*.pt
+.env
+node_modules/
+.venv/
+__pycache__/
+data/raw/
+data/processed/
+data/splits/
+data/real_interactions.csv
+reports/
